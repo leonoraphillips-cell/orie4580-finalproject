@@ -1,9 +1,6 @@
 import simpy
 import random
 
-import simpy
-import random
-
 class GPUWorker:
     """
     GPU with realistic LLM service model:
@@ -23,9 +20,5 @@ class GPUWorker:
         Converts ms → seconds for simpy.
         """
         service_ms = self.c + self.a * max(0, b - self.b0)
-
-        # Convert ms to seconds for simulation time
         service_seconds = service_ms / 1000.0
-
         return self.env.timeout(service_seconds)
-
