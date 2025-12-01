@@ -1,0 +1,13 @@
+name: orie4580
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy
+  - pandas
+  - matplotlib
+  - jupyterlab
+  - pip
+  - pip:
+      - simpy
+
