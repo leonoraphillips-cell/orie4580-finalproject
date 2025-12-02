@@ -27,4 +27,13 @@ class GPU:
         completed = self.current_batch
         self.current_batch = None
         self.busy = False
+
+        # NEW: decrement tokens
+        for (q, tokens) in completed:
+            if q.stage == "prefill":
+                q.remaining_prefill -= tokens
+            else:
+                q.remaining_decode -= tokens  # tokens = 1 for decode
+
         return completed
+

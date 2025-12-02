@@ -1,12 +1,14 @@
-# simulation.py
+# simulation2.py
 import numpy as np
 from query2 import Query
 from gpu2 import GPU
 from scheduler2 import get_next_batch
 
+
 MODE = "baseline"  # or "prefill_first"
 
-def run_simulation(
+
+def run_simulation2(
     T_end,
     arrival_rate,
     L_dist,
@@ -25,16 +27,21 @@ def run_simulation(
     decode_queue = []
 
     # GPU
-    gpu = GPU(*gpu_params)  # (c, a, b0)
+    gpu = GPU(*gpu_params)
 
     # events
     t = 0.0
     next_arrival = np.random.exponential(1 / arrival_rate)
     next_finish = np.inf
 
-    # stats
-    TTFT = []
-    departures = 0
+    # --- Utilization tracking ---
+    util_time = 0.0
+    last_t = 0.0
+
+    # --- Metrics ---
+    TTFT_list = []
+    TBT_all = []
+    completions = 0
 
     while t < T_end:
 
@@ -42,8 +49,13 @@ def run_simulation(
         t_next = min(next_arrival, next_finish)
         t = t_next
 
+        # utilization accumulation
+        if gpu.busy:
+            util_time += (t - last_t)
+        last_t = t
+
         # --------------------------
-        # ARRIVAL EVENT
+        # ARRIVAL
         # --------------------------
         if next_arrival <= next_finish:
             L = L_dist()
@@ -54,36 +66,47 @@ def run_simulation(
             next_arrival = t + np.random.exponential(1 / arrival_rate)
 
         # --------------------------
-        # GPU FINISH EVENT
+        # GPU FINISH
         # --------------------------
         else:
             completed_batch = gpu.finish_batch()
 
-            # update queries
             for (q, tokens) in completed_batch:
+
                 if q.stage == "prefill":
                     q.remaining_prefill = 0
                     q.stage = "decode"
                     q.TTFT = t
+                    TTFT_list.append(q.TTFT)
                     decode_queue.append(q)
                     prefill_queue.remove(q)
-                else:
-                    q.remaining_decode -= 1
-                    if q.remaining_decode == 0:
-                        departures += 1
+
+                else:  # decode token
+                    q.record_decode(t)
+                    if q.remaining_decode == 1:
+                        q.remaining_decode = 0
+                        completions += 1
+                        TBT_all.extend(q.TBT_list)
                         decode_queue.remove(q)
+                    else:
+                        q.remaining_decode -= 1
 
             next_finish = np.inf
 
         # --------------------------
-        # GPU DISPATCH
+        # DISPATCH NEW BATCH IF GPU IDLE
         # --------------------------
         if not gpu.busy:
             batch = get_next_batch(prefill_queue, decode_queue, K, mode)
             if batch:
                 next_finish = gpu.start_batch(batch, t)
 
+    utilization = util_time / T_end
+
     return {
-        "TTFT": np.array([q.TTFT for q in decode_queue if q.TTFT is not None]),
-        "departures": departures
+        "utilization": utilization,
+        "TTFT": np.array(TTFT_list),
+        "TBT": np.array(TBT_all),
+        "completions": completions
     }
+
