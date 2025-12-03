@@ -1,39 +1,54 @@
-# gpu.py
+# gpu2.py (NO BATCHING VERSION)
+
 import numpy as np
 
 class GPU:
+    """
+    A single GPU server that processes ONE TOKEN at a time.
+    No batching, no chunking.
+    Service time = a + Exp(c), but you can set a=0 for validation.
+    """
+
     def __init__(self, c, a, b0):
-        self.c = c    # setup time
-        self.a = a    # per-token cost
-        self.b0 = b0  # threshold where linear cost activates
+        self.c = c         # exponential rate
+        self.a = a         # setup cost (use 0 for validation)
+        self.b0 = b0       # unused now but kept for API compatibility
 
         self.busy = False
-        self.current_batch = None
+        self.current_query = None
+        self.remaining_tokens = 0
+        self.done_time = np.inf
 
-    def batch_service_time(self, token_load):
-        return self.c + self.a * max(0, token_load - self.b0)
+        # utilization tracking
+        self.total_busy = 0.0
+        self.last_busy_start = None
 
-    def start_batch(self, batch, t):
-        """batch = list of (query, tokens_processed) for this iteration."""
-        self.current_batch = batch
+    def start_token(self, q, now):
+        """Start processing exactly ONE token from query q."""
         self.busy = True
+        self.current_query = q
+        self.remaining_tokens = 1
 
-        token_load = sum(tokens for (_, tokens) in batch)
-        service_time = self.batch_service_time(token_load)
+        # token service time = a + Exp(c)
+        service_time = self.a + np.random.exponential(1/self.c)
+        self.done_time = now + service_time
 
-        return t + service_time  # finish time
+        self.last_busy_start = now
 
-    def finish_batch(self):
-        completed = self.current_batch
-        self.current_batch = None
+        return self.done_time
+
+    def finish_token(self, now):
+        """Finish processing ONE token."""
         self.busy = False
 
-        # NEW: decrement tokens
-        for (q, tokens) in completed:
-            if q.stage == "prefill":
-                q.remaining_prefill -= tokens
-            else:
-                q.remaining_decode -= tokens  # tokens = 1 for decode
+        # update utilization
+        if self.last_busy_start is not None:
+            self.total_busy += (now - self.last_busy_start)
+            self.last_busy_start = None
 
-        return completed
+        q = self.current_query
+        self.current_query = None
+        self.remaining_tokens = 0
+        self.done_time = np.inf
 
+        return q
